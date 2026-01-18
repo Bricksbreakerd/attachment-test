@@ -2,10 +2,20 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Brush, ReferenceLine } from 'recharts';
 import { Clock, ArrowLeft, ArrowRight, CheckCircle, Activity, Brain, Shield, Printer } from 'lucide-react';
 
-// --- 数据定义 ---
+// --- 工具函数：Fisher-Yates 随机洗牌算法 ---
+const shuffleArray = (array) => {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+};
 
+// --- 数据定义 ---
 // 题目数据 (已将所有性别代词替换为 "ta")
-const questions = [
+// 注意：这里的 label 和顺序是原始的，但在开始测试时会被打乱
+const rawQuestions = [
   {
     id: 1,
     category: "情感亲密与脆弱性表达",
@@ -591,6 +601,7 @@ const WelcomeScreen = ({ onStart }) => (
         <p>🕰️ <strong>测试时间：</strong> 约 10-15 分钟</p>
         <p>🧘 <strong>建议：</strong> 请在安静的环境下，凭借第一直觉选择最符合您真实感受的选项。</p>
         <p>🔒 <strong>隐私：</strong> 所有数据仅在本地处理，不会上传。</p>
+        <p>🔀 <strong>说明：</strong> 题目选项顺序随机，请仔细阅读。</p>
       </div>
 
       <button 
@@ -607,8 +618,10 @@ const QuizScreen = ({ question, currentIdx, total, onNext, onPrev, selectedOptio
   // 计时逻辑
   useEffect(() => {
     // 每次题目组件挂载或切换题目时，记录开始时间
-    // 这个逻辑在父组件中处理更合适，这里只负责展示
   }, [question.id]);
+
+  // 生成 A, B, C, D 标签
+  const getOptionLabel = (index) => String.fromCharCode(65 + index);
 
   return (
     <div className={`flex flex-col items-center justify-center min-h-screen ${morandi.bg} p-4 sm:p-8 transition-colors duration-500`}>
@@ -645,9 +658,9 @@ const QuizScreen = ({ question, currentIdx, total, onNext, onPrev, selectedOptio
           </h2>
 
           <div className="space-y-4">
-            {question.options.map((opt) => (
+            {question.options.map((opt, index) => (
               <button
-                key={opt.label}
+                key={opt.type} // 使用 type 作为 key，因为内容是唯一的
                 onClick={() => onSelect(opt.type)}
                 className={`w-full text-left p-5 rounded-xl border-2 transition-all duration-200 group relative overflow-hidden
                   ${selectedOption === opt.type 
@@ -663,7 +676,7 @@ const QuizScreen = ({ question, currentIdx, total, onNext, onPrev, selectedOptio
                       : 'bg-white text-gray-400 border-gray-300 group-hover:border-gray-400'
                     }
                   `}>
-                    {opt.label}
+                    {getOptionLabel(index)}
                   </span>
                   <span className="text-lg">{opt.text}</span>
                 </div>
@@ -723,11 +736,6 @@ const ResultScreen = ({ answers, timeData }) => {
   // 判定类型
   const resultType = useMemo(() => {
     const { anxiety, avoidance } = scores;
-    // 阈值判定：共50题。
-    // 理论上中位数是25。但这取决于题目设计。
-    // 如果全部选D(恐惧)，得分为(50, 50)。
-    // 这里取简单的中值划分，实际应用可能需要常模。
-    // 假设 > 20 为高 (考虑到A选项不加分，稍微降低阈值)
     const highAnxiety = anxiety > 20;
     const highAvoidance = avoidance > 20;
 
@@ -746,7 +754,7 @@ const ResultScreen = ({ answers, timeData }) => {
   ];
 
   // 折线图数据 (时间)
-  const lineChartData = questions.map((q) => ({
+  const lineChartData = rawQuestions.map((q) => ({
     name: `Q${q.id}`,
     time: (timeData[q.id] || 0) / 1000, // 转秒
     fullText: q.text
@@ -908,12 +916,19 @@ export default function App() {
   const [currentQuestionIdx, setCurrentQuestionIdx] = useState(0);
   const [answers, setAnswers] = useState({});
   const [timeData, setTimeData] = useState({});
+  const [shuffledQuestions, setShuffledQuestions] = useState([]);
   
   // 计时状态
   const [startTime, setStartTime] = useState(null);
 
   // 开始测试
   const handleStart = () => {
+    // 随机化题目选项
+    const newQuestions = rawQuestions.map(q => ({
+      ...q,
+      options: shuffleArray([...q.options]) // 深拷贝 options 并打乱
+    }));
+    setShuffledQuestions(newQuestions);
     setStarted(true);
     setStartTime(Date.now());
   };
@@ -922,7 +937,7 @@ export default function App() {
   const recordTimeAndProceed = (nextIdx) => {
     const now = Date.now();
     const elapsed = now - startTime;
-    const currentQId = questions[currentQuestionIdx].id;
+    const currentQId = shuffledQuestions[currentQuestionIdx].id;
 
     setTimeData(prev => ({
       ...prev,
@@ -935,13 +950,13 @@ export default function App() {
   };
 
   const handleNext = () => {
-    if (currentQuestionIdx < questions.length - 1) {
+    if (currentQuestionIdx < shuffledQuestions.length - 1) {
       recordTimeAndProceed(currentQuestionIdx + 1);
     } else {
       // 最后一题完成
       const now = Date.now();
       const elapsed = now - startTime;
-      const currentQId = questions[currentQuestionIdx].id;
+      const currentQId = shuffledQuestions[currentQuestionIdx].id;
       
       setTimeData(prev => ({
         ...prev,
@@ -961,7 +976,7 @@ export default function App() {
   const handleSelect = (optionType) => {
     setAnswers(prev => ({
       ...prev,
-      [questions[currentQuestionIdx].id]: optionType
+      [shuffledQuestions[currentQuestionIdx].id]: optionType
     }));
   };
 
@@ -970,12 +985,12 @@ export default function App() {
 
   return (
     <QuizScreen
-      question={questions[currentQuestionIdx]}
+      question={shuffledQuestions[currentQuestionIdx]}
       currentIdx={currentQuestionIdx}
-      total={questions.length}
+      total={shuffledQuestions.length}
       onNext={handleNext}
       onPrev={handlePrev}
-      selectedOption={answers[questions[currentQuestionIdx].id]}
+      selectedOption={answers[shuffledQuestions[currentQuestionIdx].id]}
       onSelect={handleSelect}
     />
   );
